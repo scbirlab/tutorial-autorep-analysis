@@ -124,7 +124,7 @@ def plotter_t(x, growths, scatter=False, dashed=None, vline=None, **kwargs):
     if vline is not None:
         axes.axvline(vline, color="grey", linestyle=":", label="_none")
     axes.set(
-        xlabel="Time (minutes)",
+        xlabel="Time",
         yscale="log",
         **kwargs,
     )
@@ -405,9 +405,9 @@ with gr.Blocks() as demo:
         ]
     with gr.Row():
         mrna_decay = gr.Slider(
-            .05, 1.,
+            .05, 100.,
             step=.01,
-            value=.8,
+            value=2.,
             label="mRNA decay rate",
         )
         dcas9_rate = gr.Slider(
