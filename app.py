@@ -27,8 +27,7 @@ STRENGTH_DEFAULTS = [1., 5., 20.]
 FITNESS_DEFAULTS = [.5, 2., .2]
 N_GUIDES: int = len(STRENGTH_DEFAULTS)
 STRAIN_LABELS = (
-    ["Non-targeting"]
-    + ["_none"] * (N_NT - 1)
+    [f"Non-targeting {i + 1}" for i in range(N_NT)]
     + [f"Guide {i + 1}" for i in range(N_GUIDES)]
 )
 
@@ -132,7 +131,9 @@ def plotter_t(x, growths, scatter=False, dashed=None, vline=None, **kwargs):
     return fig
 
 
-def plotter_ref(x, growths, scatter=False, fitlines=None, text=None, **kwargs):
+def plotter_ref(
+    x, growths, scatter=False, fitlines=None, open_points=None, text=None, **kwargs,
+):
     fig, axes = grid(aspect_ratio=1.5 if text is None else 1.7)
     plotter_f = partial(axes.scatter, s=5.) if scatter else axes.plot
     for i, y in enumerate(growths):
@@ -140,10 +141,34 @@ def plotter_ref(x, growths, scatter=False, fitlines=None, text=None, **kwargs):
             x.flatten(), y.flatten(),
             label=STRAIN_LABELS[i],
         )
+    if open_points is not None:
+        # samples excluded from the fit, to keep the domain unchanged
+        open_x, open_growths = open_points
+        for i, y in enumerate(open_growths):
+            axes.scatter(
+                open_x.flatten(), y.flatten(),
+                s=5.,
+                facecolors="none",
+                edgecolors=colors()[i],
+                label="_none",
+            )
+        axes.scatter(
+            [], [],
+            s=5.,
+            facecolors="none",
+            edgecolors="black",
+            label="Not fitted",
+        )
     if fitlines is not None:
-        fit_x, intercepts = fitlines
+        fit_x, intercepts, fit_x_all = fitlines
         for i, b in enumerate(intercepts.flatten()):
-            # gradient fixed at 1 on log-log axes
+            # gradient fixed at 1 on log-log axes: dashed where extrapolated, solid where fitted
+            axes.plot(
+                fit_x_all.flatten(), fit_x_all.flatten() * np.exp(b),
+                color=colors()[i],
+                linestyle="--",
+                label="_none",
+            )
             axes.plot(
                 fit_x.flatten(), fit_x.flatten() * np.exp(b),
                 color=colors()[i],
@@ -284,13 +309,12 @@ def normalised_ratio(dna_counts, rna_counts):
 def autorep_fitter(t, dna_counts, rna_counts, late_time):
     log_A, x0, c0 = normalised_ratio(dna_counts, rna_counts)
     late_start = max(1, int(np.flatnonzero(t >= late_time)[0]) if np.any(t >= late_time) else len(t) - 1)
-    late = slice(late_start, None)
-    # pooled non-targeting reference for each late sample
-    nt_ratio = rna_counts[:N_NT,late].sum(axis=0) / dna_counts[:N_NT,late].sum(axis=0)
+    # pooled non-targeting reference for each sample
+    nt_ratio = rna_counts[:N_NT].sum(axis=0) / dna_counts[:N_NT].sum(axis=0)
     log_A0 = np.log(nt_ratio / (x0[:N_NT].sum() / c0[:N_NT].sum()))
-    y = log_A[:,late] - log_A0[None]
-    b = y.mean(axis=(1, 2))
-    return log_A[:,late], log_A0, b, t[late_start]
+    y = log_A - log_A0[None]
+    b = y[:,late_start:].mean(axis=(1, 2))
+    return log_A, log_A0, b, late_start
 
 
 def reads_plotter(
@@ -336,13 +360,17 @@ def fit_plotter(
         sample_frac, seq_reps, seq_depth, read_var, capture_spread,
         inoculum, inoculum_var, carrying_capacity, mrna_decay, dcas9_rate, *guide_params,
     )
-    log_A_late, log_A0, b, late_start_time = autorep_fitter(t, dna_counts, rna_counts, late_time)
+    log_A, log_A0, b, late_start = autorep_fitter(t, dna_counts, rna_counts, late_time)
     true_strength = list(guide_params[:N_GUIDES])
     estimated_strength = np.expm1(-b[N_NT:])
     plot_text = "\n".join(
         f"Guide {i + 1}: $\\hat{{b}}={bi:.2f}$"
         for i, bi in enumerate(b[N_NT:])
-    ) + f"\nNon-targeting: $\\hat{{b}}={b[:N_NT].mean():.2f}$"
+    ) + (
+        "\nNon-targeting: $\\hat{b}=$" 
+        + ", ".join(f"${bi:.2f}$" for bi in b[:N_NT])
+        + "\n(should be 0; spread is the noise floor)"
+    )
     rank_recovered = np.array_equal(
         np.argsort(estimated_strength),
         np.argsort(true_strength),
@@ -353,16 +381,19 @@ def fit_plotter(
     ) + f"\nRank order recovered: {'yes' if rank_recovered else 'no'}"
 
     reference = np.exp(log_A0)
-    fit_x = np.geomspace(reference.min(), reference.max(), num=20)
+    late_reference = reference[late_start:]
+    fit_x = np.geomspace(late_reference.min(), late_reference.max(), num=20)
+    fit_x_all = np.geomspace(reference.min(), reference.max(), num=20)
     return reads_plotter(
         sample_frac, seq_reps, seq_depth, read_var, capture_spread,
         inoculum, inoculum_var, carrying_capacity, mrna_decay, dcas9_rate, *guide_params,
     ) + [
         plotter_ref(
-            reference,
-            np.exp(log_A_late),
+            late_reference,
+            np.exp(log_A[:,late_start:]),
             scatter=True,
-            fitlines=(fit_x, b),
+            fitlines=(fit_x, b, fit_x_all),
+            open_points=(reference[:late_start], np.exp(log_A[:,:late_start])),
             text=plot_text,
             xticks=np.round(np.geomspace(reference.min(), reference.max(), num=3), 2),
             xlabel="$A_0$, pooled non-targeting",
@@ -489,9 +520,9 @@ with gr.Blocks() as demo:
     inject_markdown("nuisance-parameter.md")
     late_time = gr.Slider(
         0., MAX_TIME,
-        step=1.,
+        step=.1,
         value=0.,
-        label="Use samples after (minutes)",
+        label="Use samples after time",
     )
     plot_fit = gr.Button("Estimate sgRNA strength")
     fit_curves_ref = gr.Plot(label="Normalised ratio vs non-targeting reference", format="png")
