@@ -1,3 +1,22 @@
+*.pyc
+*.so
+*.egg-info
+*.whl
+.DS_Store
+.mypy_cache/
+.pytest_cache/
+.idea
+.vscode
 __pycache__/
-.venv/
+*.log
+
+# gradio
 .gradio/
+bartab-*
+
+# virtualenv/venv directories
+/venv/
+/bin/
+/include/
+/lib/
+/share/

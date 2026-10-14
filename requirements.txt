@@ -1,4 +1,9 @@
-carabiner-tools[pd,mpl]>=0.0.4
-numpy<2
-gradio==5.31.0
+anndata
+bartab
+carabiner-tools[pd,mpl]>=0.0.5.post3
+gradio==6.30.0
+nemony
+numpy
 scipy
+scikit-learn
+statsmodels
