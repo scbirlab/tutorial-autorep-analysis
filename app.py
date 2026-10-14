@@ -11,20 +11,20 @@ from scipy.stats import multivariate_hypergeom, nbinom
 
 # Set the default color cycle
 mpl.rcParams['axes.prop_cycle'] = mpl.cycler(
-    color=("lightgrey", "dimgrey") + colorblind_palette()[1:],
+    color=("lightgrey", "dimgrey") + colorblind_palette(name="vibrant_0")[1:],
 )
 
 SEED: int = 42
-MAX_TIME: float = 360.  # minutes
+MAX_TIME: float = 5.
 SOURCES_DIR: str = "sources"
 
-E_MAX: float = 2.  # transcripts per cell per minute, with no dCas9 bound
-GROWTH_RATE: float = .03  # per minute, intrinsic growth of non-targeting strains
-PSEUDOCOUNT: float = .5  # only to avoid log(0)
+E_MAX: float = 2.  # transcript rate per cell, with no dCas9 bound
+GROWTH_RATE: float = 1.  # intrinsic growth of non-targeting strains
+PSEUDOCOUNT: float = 1.  # only to avoid log(0)
 
 N_NT: int = 2  # non-targeting guides, pooled as the reference
 STRENGTH_DEFAULTS = [1., 5., 20.]
-FITNESS_DEFAULTS = [1., 1., .5]
+FITNESS_DEFAULTS = [.5, 2., .2]
 N_GUIDES: int = len(STRENGTH_DEFAULTS)
 STRAIN_LABELS = (
     ["Non-targeting"]
@@ -396,7 +396,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         guide_fitness = [
             gr.Slider(
-                0., 1.5,
+                0., 2.,
                 step=.05,
                 value=w,
                 label=f"Relative growth rate, guide {i + 1}",
@@ -407,14 +407,14 @@ with gr.Blocks() as demo:
         mrna_decay = gr.Slider(
             .05, 1.,
             step=.01,
-            value=.2,
-            label="mRNA decay rate (per minute)",
+            value=.8,
+            label="mRNA decay rate",
         )
         dcas9_rate = gr.Slider(
             .005, 1.,
             step=.005,
-            value=.05,
-            label="dCas9 accumulation rate (per minute)",
+            value=.8,
+            label="dCas9 accumulation rate",
         )
     with gr.Row():
         inoculum = gr.Slider(
@@ -432,7 +432,7 @@ with gr.Blocks() as demo:
         carrying_capacity = gr.Slider(
             N_NT + N_GUIDES + 1, 10_000,
             step=1,
-            value=100,
+            value=10,
             label="Total carrying capacity (x inoculum)",
         )
     plot_pool = gr.Button("Plot growth and transcript levels")
@@ -490,7 +490,7 @@ with gr.Blocks() as demo:
     late_time = gr.Slider(
         0., MAX_TIME,
         step=1.,
-        value=160.,
+        value=0.,
         label="Use samples after (minutes)",
     )
     plot_fit = gr.Button("Estimate sgRNA strength")
