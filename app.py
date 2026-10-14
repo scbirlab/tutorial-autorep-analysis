@@ -103,8 +103,8 @@ def calculate_pool(
     return t, cells, transcripts_per_cell, qss
 
 
-def plotter_t(x, growths, scatter=False, dashed=None, vline=None, **kwargs):
-    fig, axes = grid(aspect_ratio=1.5)
+def plotter_t(x, growths, scatter=False, dashed=None, vline=None, aspect_ratio=None, **kwargs):
+    fig, axes = grid(aspect_ratio=aspect_ratio or 1.5)
     plotter_f = partial(axes.scatter, s=5.) if scatter else axes.plot
     for i, y in enumerate(growths):
         plotter_f(
@@ -238,7 +238,8 @@ def pool_plotter(
             t,
             transcripts_per_cell / initial,
             dashed=qss / initial,
-            ylabel="Transcripts per cell, relative to $t=0$",
+            ylabel="Transcripts per cell,\nrelative to $t=0$",
+            aspect_ratio=1.6,
         ),
     ]
 
