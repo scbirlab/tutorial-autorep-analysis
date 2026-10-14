@@ -1,1 +1,1 @@
-# Fitness estimation from pooled growth
+# Autorep sgRNA strength from pooled CRISPRi-seq and RNA-seq

@@ -1,180 +1,195 @@
 ---
-title: Tutorial - Fitness estimation from pooled growth and NGS
+title: Tutorial - Autorep sgRNA strength from pooled CRISPRi-seq and RNA-seq
 emoji: 🧮
 colorFrom: green
 colorTo: blue
 sdk: gradio
-sdk_version: 5.31.0
+sdk_version: 6.30.0
 app_file: app.py
-pinned: false
+pinned: true
 license: mit
-short_description: Inferring competitive fitness from NGS data
+short_description: Inferring sgRNA strength from NGS autorep experiments
 tags:
     - biology
     - sequencing
+    - pooled-screen
+    - fitness
+    - gradio
 ---
 
-# Tutorial – Fitness estimation from pooled growth
+# Tutorial – Autorep sgRNA strength from pooled CRISPRi-seq and RNA-seq
 
-[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-md-dark.svg)](https://huggingface.co/spaces/scbirlab/tutorial-seq-fitness)
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-md-dark.svg)](https://huggingface.co/spaces/scbirlab/tutorial-autorep-analysis)
 
-This is the repository for the interactive tutorial, acccessed [here](https://huggingface.co/spaces/scbirlab/tutorial-seq-fitness). Non-interactive text from the tutorial is below.
+This is the repository for the interactive tutorial, acccessed [here](https://huggingface.co/spaces/scbirlab/tutorial-autorep-analysis). 
+Non-interactive text from the tutorial is below.
 
-## Multiplex growth curves
+## The autorep experiment
 
-How do strains grow when competing with each other?
+CRISPRi sgRNAs differ in how strongly they repress their target, and the difference depends 
+on the spacer sequence. How do we rank sgRNAs by strength, in a pool?
 
-That's given by the [Lotka–Volterra competition model](https://en.wikipedia.org/wiki/Competitive_Lotka%E2%80%93Volterra_equations). 
-For two strains:
+In the autorep design, every strain carries a fluorescent reporter (mWasabi) with the sgRNA's 
+own target site in its 5'UTR. Each strain has one sgRNA, so the spacer is also the strain's barcode. 
+The strains are grown together in a pool. When dCas9 is induced, each sgRNA represses its own 
+reporter, and we measure two things by sequencing:
 
-$$
-\frac{dn_{wt}}{dt} = w_{wt} n_{wt} \left( 1 - \frac{n_{wt} + n_{1}}{K} \right)
-$$
+- $c_i(t)$: gDNA spacer-amplicon counts for strain $i$ at time $t$. These count **cells**.
+- $x_i(t)$: RNA-seq counts of the barcoded reporter transcript for strain $i$ at time $t$. 
+These count **transcripts**.
 
-$$
-\frac{dn_1}{dt} = w_{1} n_1 \left( 1 - \frac{n_{wt} + n_{1}}{K} \right)
-$$
-
-
-- $n_i(t)$: abundance of species (or strain) $i$ at time $t$.
-- $w_i$: intrinsic (exponential) growth rate of species $i$.
-- $K$: carrying capacity.
-
-We can generalize to many strains. For each one:
+A dCas9 bound at the target site blocks transcription. If a single site is at equilibrium 
+occupancy, the fraction of time the promoter is free (unrepressed) is
 
 $$
-\frac{dn_i}{dt} = w_{i} n_i \left( 1 - \frac{\Sigma_j n_j}{K} \right)
+\frac{1}{1 + K_i R}
 $$
 
-It's not possible to algebraically integrate these equations, since they are
-circularly dependent on each other. But we can numerically integrate, to simulate 
-multiplexed growth curves.
+- $K_i$: affinity of the dCas9–sgRNA complex for its site. This is the sgRNA strength we want to rank.
+- $R$: concentration of free dCas9. It is the same for every strain.
 
-### Removing time dependence
-
-It can be difficult to get absolute fitness out of these curves, because 
-when the pool approaches the carrying capacity, all the strains growth rates 
-mutually affect each other. 
-
-However, if we're only interested in the relative fitness of multiplexed strains relative
-to a reference (e.g. wild-type) strain, then we can make this simplification:
+So production of reporter transcript from strain $i$ is
 
 $$
-\frac{dn_{i}}{dt} / \frac{dn_{wt}}{dt} = \frac{dn_{i}}{dn_{wt}} = \frac{w_{i} n_i}{w_{wt} n_{wt}}
+E_i = \frac{E_{max}}{1 + K_i R}
 $$
 
-The interdependency term cancels out, and time is removed, with the reference strain's
-growth acting as the clock. Unlike the time-dependent Lotka-Volterra equations, this
-has a closed-form integral:
+where $E_{max}$ is production with no dCas9 bound. Because $R$ is shared, we can only identify 
+the dimensionless product $K_i R$. That is enough for ranking, since multiplying every $K_i$ 
+by the same constant does not change the order.
+
+## Transcript dynamics in growing cells
+
+Let $M_i$ be the total number of reporter transcripts from strain $i$ in the pool, and $n_i$ the 
+number of cells. Transcripts are made at rate $E_i$ per cell and decay at rate $d$:
 
 $$
-\log n_i(t) = \frac{w_i}{w_{wt}} \log \frac{n_{wt}(t)}{n_{wt}(0)} + \log{n_i(0)}
+\frac{dM_i}{dt} = E_i n_i - d M_i
 $$
 
-So now the log of the number of cells of a mutant at any moment ($n_1(t)$) is dependent only
-on its inoculum ($n_1(0)$), how much the reference strain has grown (i.e. fold-expansion, 
-$\frac{n_{wt}(t)}{n_{wt}(0)}$), and the ratio of fitness between the mutant and the 
-reference ($\frac{n_{wt}(t)}{n_{wt}(0)}$).
+This is awkward to work with because $M_i$ also grows whenever the population grows. We want the 
+transcript level **per cell**, $m_i = M_i / n_i$. Differentiating $M_i / n_i$ with the quotient rule, and substituting $\frac{dM_i}{dt}$ from above, 
+$$
+\frac{d}{dt} \frac{M_i}{n_i} = \frac{n_i \left( E_i n_i - d M_i \right) - M_i \frac{dn_i}{dt}}{n_i^2} = E_i - d \, m_i - \left( \frac{1}{n_i} \frac{dn_i}{dt} \right) m_i
+$$
+
+The bracketed term is the instantaneous per-capita growth rate of the strain. Call it $r_i$:
+
+$$
+r_i = \frac{1}{n_i} \frac{dn_i}{dt} = \frac{d \log n_i}{dt}
+$$
+
+Then
+
+$$
+\frac{dm_i}{dt} = E_i - (d + r_i) m_i
+$$
+
+The extra term $r_i m_i$ is dilution. Every division splits a cell's transcripts between the two 
+daughters, so growth removes transcripts per cell in the same way decay does.
+
+- $m_i(t)$: reporter transcripts per cell in strain $i$.
+- $d$: mRNA decay rate. For bacterial mRNA, half-lives of 2–5 minutes correspond to $d \approx$ 0.15–0.35 per minute.
+- $r_i(t)$: instantaneous per-capita growth rate of strain $i$. In exponential phase it equals the intrinsic growth rate $w_i$ of the previous tutorial. In the Lotka–Volterra model it is $w_i$ multiplied by 
+$\left(1 - \frac{\Sigma_j n_j}{K}\right)$, a factor shared by all strains. It can be measured from the DNA counts as $d \log n_i / dt$, with the spike-in putting $n_i(t)$ on an absolute scale (see the previous tutorial).
+
+This equation has a closed-form solution if $r_i$ is constant over the relaxation. If $m_i$ starts at $m_i(0)$,
+
+$$
+m_i(t) = m_i^* + \left( m_i(0) - m_i^* \right) e^{-(d + r_i) t}, \qquad m_i^* = \frac{E_i}{d + r_i}
+$$
+
+The transcript level relaxes to its steady state $m_i^*$ at rate $d + r_i$. With a decay rate 
+of 0.15–0.35 per minute, this takes a few minutes.
+
+### Steady state
+
+Samples taken tens of minutes or hours after induction are on the plateau, so we can use 
+$m_i = m_i^*$ (the quasi-steady state, QSS). This holds when $r_i(t)$ changes slowly compared with the relaxation rate $d + r_i$, so that $m_i$ tracks its instantaneous steady state $E_i / (d + r_i(t))$. Below, $r_i$ means its value at the sampling time. Compare strain $i$ to a reference strain 0 with no repression 
+($K_0 = 0$, e.g. a non-targeting sgRNA):
+
+$$
+\frac{m_i}{m_0} = \frac{d + r_0}{d + r_i} \cdot \frac{1}{1 + K_i R}
+$$
+
+The first factor is a growth term, evaluated with the instantaneous growth rates at the sampling time. It is 1 when $r_i = r_0$, and then
+
+$$
+\frac{m_i}{m_0} = \frac{1}{1 + K_i R}
+$$
+
+So transcript level per cell falls with sgRNA strength, with a known shape, and no time 
+dependence under steady state (late timepoint) consitions. 
+
+We assume the growth term is 1 for the analysis below. This holds near carrying capacity, where every strain 
+grows slowly and similarly. It fails for guides that have a strong effect on an essential chromosomal gene. Those strains 
+grow slower, dilute their transcripts less, and look weaker than they are. 
+
+It might seem better to fit the time course after induction. But dCas9 
+does not switch on instantly: $R(t)$ rises over a timescale comparable to or slower than mRNA relaxation. 
+The early transient therefore mostly reports how fast dCas9 accumulates, not $d$ or $K_i$. 
+Fitting it with a model that assumes a step change in $R$ misattributes the rates. 
+For ranking, use late timepoints only.
 
 ## Read counts from next-generation sequencing
 
-But we don't actually measure the number of cells directly. Instead, we're measuring the
-number of reads (or UMIs) which represent a random sampling of the population followed by
-molecular biology handling and uneven sequencing per lane which decouples the relative
-abundances for each timepoint. 
+But we don't measure $m_i$ directly. Each sample is a random sampling of the pool, followed 
+by molecular biology handling and uneven sequencing depth. Each guide also has its own capture and 
+amplification efficiency, which differs between strains because the 5'UTR sequence differs.
 
-Below, you can simulate read counts for technical replicates of the growth curves above.
-The simulation:
+For one guide in sample $s$, relative to its own $t = 0$ sample,
 
-1. Randomly samples a defined fraction of the cell population (without replacement, i.e.
-the [Hypergeometric distribution](https://en.wikipedia.org/wiki/Hypergeometric_distribution)).
-Smaller samples from smaller populations are noisier.
-2. Calculates the resulting proportional representation of every strain in every sample.
-3. Multiplies that proportion by read depth.
-4. Randomly samples sequencing read counts resulting from variations in library construction
-and other stochasticity, according to the 
-[Negative Binomial distribution](https://en.wikipedia.org/wiki/Negative_binomial_distribution), 
-an established noise model for sequencing counts.
-
-### Accounting for sequencing subsampling per sample
-
-Each sequencing sample $s$ could be over- or under-sampling the population relative to the first
-timepoint by some factor $\phi_s$.
-
-$$\log \frac{c_i(t)}{c_i(0)} = \log \phi_s\frac{n_i(t)}{n_i(0)} = \log \phi_s + \frac{w_i}{w_{wt}} \log \frac{n_{wt}(t)}{n_{wt}(0)}$$
+$$
+\frac{c_i(t)}{c_i(0)} = \phi_s \frac{n_i(t)}{n_i(0)}
+\qquad
+\frac{x_i(t)}{x_i(0)} = k_s \frac{M_i(t)}{M_i(0)} = k_s \frac{m_i(t)}{m_i(0)} \frac{n_i(t)}{n_i(0)}
+$$
 
 Variables:
-- $c_i(t)$: Read (or UMI) count of strain $i$ at time $t$
-- $\phi_s$: The ratio of sampling depth at time $t$ to that at time $0$ for sample $s$
+- $c_i(t)$: gDNA read count of strain $i$ at time $t$.
+- $x_i(t)$: RNA read count of strain $i$ at time $t$.
+- $\phi_s$: ratio of DNA sampling depth at time $t$ to that at time 0 for sample $s$.
+- $k_s$: the same for RNA-seq.
 
-The factor $\phi_s$ is the ratio of _the ratio of read counts between samples_ 
-and _the ratio of cell counts between samples_ for any strain (assuming each strain
-is sampled without bias):
-
-$$\log \phi_s = \log \frac{c_i(t)}{c_i(0)} - \log \frac{n_i(0)}{n_i(0)}$$
-
-We can get rid of the nuisance parameter $\phi_s$ (which is difficult to measure becuase
-we don't know the true number of cells for each strain and sample) using the following trick.
-
-We have the equation for read counts for mutant $i$ (same as above):
+Dividing by $t = 0$ cancels each guide's constant capture efficiency and any per-guide mRNA stability 
+effect that is the same before and after induction. Dividing the RNA ratio by the DNA ratio 
+cancels the number of cells, $\frac{n_i(t)}{n_i(0)}$, which contains all the population dynamics. 
+Define
 
 $$
-\log \frac{c_i(t)}{c_i(0)} = \log \phi_s + \frac{w_i}{w_{wt}} \log \frac{n_{wt}(t)}{n_{wt}(0)}
+A_i = \frac{x_i(t) / c_i(t)}{x_i(0) / c_i(0)} = \frac{k_s}{\phi_s} \frac{m_i(t)}{m_i(0)}
 $$
 
-And for the reference strain (relative fitness is 1):
+$A_i$ is the normalised RNA/DNA ratio. It is proportional to transcripts per cell, 
+relative to before induction.
+
+### Removing the sample-level nuisance parameter
+
+The factor $\frac{k_s}{\phi_s}$ is the RNA-to-DNA depth ratio of sample $s$ relative to $t = 0$. It is 
+one unknown number per sample, and is shared by every guide. We get rid of it the same way as 
+in the previous tutorial: take a reference.
+
+For the non-targeting reference guides ($K_0 R = 0$, and $m_0$ constant),
 
 $$
-\log \frac{c_{wt}(t)}{c_{wt}(0)} = \log \phi_s + \log \frac{n_{wt}(t)}{n_{wt}(0)}
+A_0 = \frac{k_s}{\phi_s}
 $$
 
-We can make $\phi_s$ disappear by taking the difference:
+Before induction, dCas9 is off, so $R = 0$ and every guide is at steady state with 
+$m_i(0) = \frac{E_{max}}{d + r_i}$. If the guides do not change growth before induction 
+($r_i = r_0$ at $t = 0$), then $m_i(0) = m_0(0)$ and the ratio of the two normalised ratios 
+is the ratio of late steady states:
 
 $$
-\log \frac{c_i(t)}{c_i(0)} - \log \frac{c_{wt}(t)}{c_{wt}(0)} = \frac{w_i}{w_{wt}} \log \frac{n_{wt}(t)}{n_{wt}(0)} - \log \frac{n_{wt}(t)}{n_{wt}(0)}
+\frac{A_i}{A_0} = \frac{m_i}{m_0} = \frac{d + r_0}{d + r_i} \cdot \frac{1}{1 + K_i R}
 $$
 
-This is equivalent to:
+Plotted against the reference term across late samples, each guide gives a straight line with gradient 1 and intercept $-\log(1 + K_i R)$. The ingredients are:
 
-$$
-\log \left( \frac{c_i(t)}{c_{wt}(t)}\frac{c_{wt}(0)}{c_i(0)} \right) = \left(\frac{w_i}{w_{wt}} - 1 \right) \log \frac{n_{wt}(t)}{n_{wt}(0)}
-$$
+- Dividing RNA by DNA removes cell number and population growth.
+- Dividing by each guide's own $t = 0$ removes per-guide capture efficiency and mRNA stability.
+- Dividing by the pooled non-targeting guides removes the per-sample depth factor $\frac{k_s}{\phi_s}$.
+- Late timepoints are on the transcript plateau, and the growth term is 1.
 
-So the ratio of _the count ratio of a strain to the reference strain at time t_ to 
-_the count ratio of a strain to the reference strain at time 0_ is
-dependent only on the relative fitness and the true fold-expansion of the reference strain.
-
-Plotting the ratio of _the count ratio of a strain to the reference strain at time t_ to 
-_the count ratio of a strain to the reference strain at time 0_ 
-should give a straight line (on a log-log) plot, with intercept 0 and gradient equal to the relative fitness minus 1.
-
-### Using spike-in counts
-
-But we don't actually know the true fold-expansion of the reference strain, since 
-it's not directly observed. However, a non-growing fitness-zero control can help,
-such as a heat-killed strain or a spike-in plasmid.
-
-We start with the equation before,
-
-$$
-\log \left( \frac{c_i(t)}{c_{wt}(t)}\frac{c_{wt}(0)}{c_i(0)} \right) = \left(\frac{w_i}{w_{wt}} - 1 \right) \log \frac{n_{wt}(t)}{n_{wt}(0)}
-$$
-
-But for the fitness-zero control, $w_{spike} = 0$, so:
-
-$$
-\log \left( \frac{c_{spike}(t)}{c_{wt}(t)}\frac{c_{wt}(0)}{c_{spike}(0)} \right) = -\log \frac{n_{wt}(t)}{n_{wt}(0)}
-$$
-
-This means that, although we don't know how the reference strain grows directly, its
-growth is given from the ratio of the spike counts to the reference counts, normalized
-to the same ratio at time 0.
-
-This leaves us with the overall equation:
-
-$$
-\log \left( \frac{c_i(t)}{c_{wt}(t)}\frac{c_{wt}(0)}{c_i(0)} \right) = \left(1 - \frac{w_i}{w_{wt}} \right) \log \left( \frac{c_{spike}(t)}{c_{wt}(t)}\frac{c_{wt}(0)}{c_{spike}(0)} \right)
-$$
-
-If we plot the left hand side against the right, we should get a straight line for 
-each strain with intercept zero and gradient $1 - \frac{w_i}{w_{wt}}$.
+What remains is $-\log(1 + K_i R)$. Averaging the left side minus the reference term over the late samples gives this value per guide, $\hat{b}_i$. The most negative $\hat{b}_i$ is the strongest guide, so $-\hat{b}_i = \log(1 + K_i R)$ ranks the guides. The transient 
+after induction, the mRNA decay rate $d$, and $E_{max}$ are not needed.
